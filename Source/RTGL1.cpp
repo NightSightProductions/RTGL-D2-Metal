@@ -18,7 +18,11 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "VulkanDevice.h"
+#ifdef RG_USE_METAL
+    #include "Metal/MetalDevice.h"
+#else
+    #include "VulkanDevice.h"
+#endif
 #include "RgException.h"
 
 #include "TextureExporter.h"
@@ -37,7 +41,11 @@ bool                   g_breakOnError{ true };
 namespace
 {
 
+#ifdef RG_USE_METAL
+using Device = RTGL1::MetalDevice;
+#else
 using Device = RTGL1::VulkanDevice;
+#endif
 std::unique_ptr< Device > g_device{};
 
 Device* TryGetDevice()
@@ -381,7 +389,7 @@ RGAPI RgResult RGCONV RGAPI_CALL rgCreateInstance( const RgInstanceCreateInfo* p
                                    pInfo->sizeOfRgInterface );
         }
 
-        memcpy( pInterface, &interf, std::min( sizeof( RgInterface ), pInfo->sizeOfRgInterface ) );
+        memcpy( pInterface, &interf, std::min< size_t >( sizeof( RgInterface ), pInfo->sizeOfRgInterface ) );
 
         // initialize everything
         g_device = std::make_unique< Device >( pInfo );

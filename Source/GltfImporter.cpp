@@ -779,7 +779,7 @@ namespace
 #if 1
         // SHIPPING_HACK: if original game texture referenced in gltf, 
         bool trackOriginalTexture = false;
-        if( fullPaths[ TEXTURE_ALBEDO_ALPHA_INDEX ].native().find( TEXTURES_FOLDER_JUNCTION_W ) !=
+        if( fullPaths[ TEXTURE_ALBEDO_ALPHA_INDEX ].wstring().find( TEXTURES_FOLDER_JUNCTION_W ) !=
             std::wstring::npos )
         {
             {
@@ -859,7 +859,7 @@ namespace
 
         constexpr auto candelaToLuminousFlux = []( float lumensPerSteradian ) {
             // to lumens
-            return lumensPerSteradian * ( 4 * float( Utils::M_PI ) );
+            return lumensPerSteradian * ( 4 * float( Utils::Pi ) );
         };
 
 

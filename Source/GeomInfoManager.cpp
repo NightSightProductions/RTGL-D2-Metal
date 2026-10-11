@@ -19,6 +19,7 @@
 // SOFTWARE.
 
 #include "GeomInfoManager.h"
+#include "PrimitiveRouting.h"
 
 #include <algorithm>
 
@@ -39,60 +40,12 @@ namespace
 
 constexpr auto MatchPrevInvalidValue = RTGL1::GeomInfoManager::MatchPrevIndexType{ -1 };
 
-#if !SUPPRESS_TEXLAYERS
-uint32_t GetMaterialBlendFlags( const RgTextureLayerBlendType* blend, uint32_t layerIndex )
-{
-    if( blend == nullptr )
-    {
-        return 0;
-    }
-    assert( layerIndex < GEOM_INST_FLAG_BLENDING_LAYER_COUNT );
-
-    uint32_t bitOffset = MATERIAL_BLENDING_TYPE_BIT_COUNT * layerIndex;
-
-    switch( *blend )
-    {
-        case RG_TEXTURE_LAYER_BLEND_TYPE_OPAQUE: return MATERIAL_BLENDING_TYPE_OPAQUE << bitOffset;
-        case RG_TEXTURE_LAYER_BLEND_TYPE_ALPHA: return MATERIAL_BLENDING_TYPE_ALPHA << bitOffset;
-        case RG_TEXTURE_LAYER_BLEND_TYPE_ADD: return MATERIAL_BLENDING_TYPE_ADD << bitOffset;
-        case RG_TEXTURE_LAYER_BLEND_TYPE_SHADE: return MATERIAL_BLENDING_TYPE_SHADE << bitOffset;
-        default: assert( 0 ); return 0;
-    }
-}
-
-uint32_t GetMaterialBlendFlags( const RgMeshPrimitiveTextureLayersEXT& info, uint32_t layerIndex )
-{
-    assert( layerIndex <= 3 );
-
-    switch( layerIndex )
-    {
-        case 0: return RG_TEXTURE_LAYER_BLEND_TYPE_OPAQUE;
-        case 1: return GetMaterialBlendFlags( info.pLayer1 ? &info.pLayer1->blend : nullptr, 1 );
-        case 2: return GetMaterialBlendFlags( info.pLayer2 ? &info.pLayer1->blend : nullptr, 2 );
-        case 3: return GetMaterialBlendFlags( info.pLayer3 ? &info.pLayer1->blend : nullptr, 3 );
-        default: assert( 0 ); return 0;
-    }
-}
-#endif
 
 }
 
 bool RTGL1::GeomInfoManager::LayerExists( const RgMeshPrimitiveInfo& info, uint32_t layerIndex )
 {
-#if !SUPPRESS_TEXLAYERS
-    if( auto layers = pnext::find< RgMeshPrimitiveTextureLayersEXT >( &info ) )
-    {
-        switch( layerIndex )
-        {
-            case 1: return layers->pLayer1 && layers->pLayer1->pTexCoord;
-            case 2: return layers->pLayer2 && layers->pLayer2->pTexCoord;
-            case 3: return layers->pLayer3 && layers->pLayer3->pTexCoord;
-            default: assert( 0 ); return false;
-        }
-    }
-#endif
-
-    return false;
+    return RTGL1::LayerExists( info, layerIndex );
 }
 
 const RgFloat2D* RTGL1::GeomInfoManager::AccessLayerTexCoords( const RgMeshPrimitiveInfo& info,
@@ -119,89 +72,7 @@ uint32_t RTGL1::GeomInfoManager::GetPrimitiveFlags( const RgMeshInfo*          m
                                                     const RgMeshPrimitiveInfo& info,
                                                     bool                       isDynamicVertexData )
 {
-    uint32_t f = 0;
-
-
-#if !SUPPRESS_TEXLAYERS
-    if( auto layers = pnext::find< RgMeshPrimitiveTextureLayersEXT >( &info ) )
-    {
-        f |= LayerExists( info, 1 ) ? GEOM_INST_FLAG_EXISTS_LAYER1 : 0;
-        f |= LayerExists( info, 2 ) ? GEOM_INST_FLAG_EXISTS_LAYER2 : 0;
-        f |= LayerExists( info, 3 ) ? GEOM_INST_FLAG_EXISTS_LAYER3 : 0;
-
-        f |= GetMaterialBlendFlags( *layers, 0 );
-        f |= GetMaterialBlendFlags( *layers, 1 );
-        f |= GetMaterialBlendFlags( *layers, 2 );
-        f |= GetMaterialBlendFlags( *layers, 3 );
-    }
-#endif
-
-    if( ( info.flags & RG_MESH_PRIMITIVE_MIRROR ) ||
-        ( mesh && ( mesh->flags & RG_MESH_FORCE_MIRROR ) ) )
-    {
-        f |= GEOM_INST_FLAG_REFLECT;
-    }
-
-    if( ( info.flags & RG_MESH_PRIMITIVE_WATER ) ||
-        ( mesh && ( mesh->flags & RG_MESH_FORCE_WATER ) ) )
-    {
-        f |= GEOM_INST_FLAG_MEDIA_TYPE_WATER;
-        f |= GEOM_INST_FLAG_REFLECT;
-        f |= GEOM_INST_FLAG_REFRACT;
-    }
-
-    if( info.flags & RG_MESH_PRIMITIVE_ACID )
-    {
-        f |= GEOM_INST_FLAG_MEDIA_TYPE_ACID;
-        f |= GEOM_INST_FLAG_REFLECT;
-        f |= GEOM_INST_FLAG_REFRACT;
-    }
-
-    if( ( info.flags & RG_MESH_PRIMITIVE_GLASS ) ||
-        ( mesh && ( mesh->flags & RG_MESH_FORCE_GLASS ) ) )
-    {
-        f |= GEOM_INST_FLAG_MEDIA_TYPE_GLASS;
-        f |= GEOM_INST_FLAG_REFLECT;
-        f |= GEOM_INST_FLAG_REFRACT;
-    }
-
-    if( info.flags & RG_MESH_PRIMITIVE_GLASS_IF_SMOOTH )
-    {
-        f |= GEOM_INST_FLAG_GLASS_IF_SMOOTH;
-    }
-
-    if( info.flags & RG_MESH_PRIMITIVE_MIRROR_IF_SMOOTH )
-    {
-        f |= GEOM_INST_FLAG_MIRROR_IF_SMOOTH;
-    }
-
-    if( ( info.flags & RG_MESH_PRIMITIVE_IGNORE_REFRACT_AFTER ) ||
-        ( mesh && ( mesh->flags & RG_MESH_FORCE_IGNORE_REFRACT_AFTER ) ) )
-    {
-        f |= GEOM_INST_FLAG_IGNORE_REFRACT_AFTER;
-    }
-
-    if( !( info.flags & RG_MESH_PRIMITIVE_DONT_GENERATE_NORMALS ) )
-    {
-        f |= GEOM_INST_FLAG_GENERATE_NORMALS;
-    }
-
-    if( info.flags & RG_MESH_PRIMITIVE_FORCE_EXACT_NORMALS )
-    {
-        f |= GEOM_INST_FLAG_EXACT_NORMALS;
-    }
-
-    if( info.flags & RG_MESH_PRIMITIVE_THIN_MEDIA )
-    {
-        f |= GEOM_INST_FLAG_THIN_MEDIA;
-    }
-
-    if( isDynamicVertexData )
-    {
-        f |= GEOM_INST_FLAG_IS_DYNAMIC;
-    }
-
-    return f;
+    return RTGL1::GetPrimitiveFlags( mesh, info, isDynamicVertexData );
 }
 
 RTGL1::GeomInfoManager::GeomInfoManager( VkDevice                            _device,

@@ -34,6 +34,8 @@ set(Sources
     "Source/ASBuilder.cpp"
     "Source/ScratchBuffer.cpp"
     "Source/Utils.cpp"
+    "Source/UtilsMath.cpp"
+    "Source/UtilsFormat.cpp"
     "Source/PathTracer.cpp"
     "Source/Common.cpp"
     "Source/Matrix.cpp"
@@ -43,7 +45,8 @@ set(Sources
     "Source/ImageLoader.cpp" 
     "Source/TextureManager.cpp" 
     "Source/MemoryAllocator.cpp" 
-    "Source/SamplerManager.cpp" 
+    "Source/SamplerManager.cpp"
+    "Source/SamplerHandle.cpp" 
     "Source/TextureOverrides.cpp"
     "Source/TextureDescriptors.cpp" 
     "Source/TextureUploader.cpp"
@@ -54,6 +57,8 @@ set(Sources
     "Source/ImageComposition.cpp"
     "Source/Tonemapping.cpp"
     "Source/LightManager.cpp"
+    "Source/LightEncoding.cpp"
+    "Source/LpmParams.cpp"
     "Source/AutoBuffer.cpp"
     "Source/ASComponent.cpp"
     "Source/CubemapManager.cpp"
@@ -87,6 +92,7 @@ set(Sources
     "Source/DebugWindows.cpp"
     "Source/ScratchImmediate.cpp"
     "Source/GltfExporter.cpp"
+    "Source/PrimitiveLights.cpp"
     "Source/GltfImporter.cpp"
     "Source/FolderObserver.cpp"
     "Source/TextureExporter.cpp"
@@ -134,6 +140,8 @@ option(RG_WITH_NATIVE_DLSS      "Build RTGL1 with native DLSS2"             ON)
 
 option(RG_WITH_EXAMPLES         "Build with examples executable"            ON)
 
+option(RG_WITH_METAL            "Build with native Metal backend instead of Vulkan (macOS)" OFF)
+
 
 # for KTX-Software
 add_definitions(-DKHRONOS_STATIC -DLIBKTX)
@@ -170,6 +178,14 @@ if (RG_WITH_SURFACE_XLIB)
     message(STATUS "RG_WITH_SURFACE_XLIB enabled")
     add_definitions(-DRG_USE_SURFACE_XLIB)
     add_definitions(-DVK_USE_PLATFORM_XLIB_KHR)
+endif()
+
+
+# Metal: a separate backend, built instead of everything below
+if (RG_WITH_METAL)
+    message(STATUS "RG_WITH_METAL enabled")
+    include(Source/Metal/Metal.cmake)
+    return()
 endif()
 
 

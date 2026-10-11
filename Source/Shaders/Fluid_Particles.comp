@@ -23,8 +23,15 @@
 #extension GL_EXT_shader_16bit_storage : require
 #extension GL_EXT_shader_explicit_arithmetic_types : require
 #extension GL_EXT_ray_query : require
+#ifndef METAL
 #extension GL_EXT_ray_tracing_position_fetch : require
+#endif
 
+#ifdef METAL
+// no GL_EXT_ray_tracing_position_fetch on Metal: a triangle's positions are from the vertex buffers
+#define DESC_SET_GLOBAL_UNIFORM 2
+#define DESC_SET_VERTEX_DATA    3
+#endif
 #include "ShaderCommonGLSLFunc.h"
 #include "Random.h"
 
@@ -84,14 +91,30 @@ bool traceCollisionRay( vec3 origin, vec3 direction, float tmax, out vec3 hit, o
     {
         hit = origin + direction * rayQueryGetIntersectionTEXT( rayQuery, true );
 
+        vec3 positions[ 3 ];
+#ifdef METAL
+        {
+            // RAY_QUERY_GROUPED_INSTANCES: an instance's custom index is ( its first geometry's global index << 4 )
+            const int globalGeometryIndex =
+                int( uint( rayQueryGetIntersectionInstanceCustomIndexEXT( rayQuery, true ) ) >> 4 ) +
+                rayQueryGetIntersectionGeometryIndexEXT( rayQuery, true );
+
+            // already in world space
+            const mat3 p = getOnlyCurPositions( globalGeometryIndex,
+                                                rayQueryGetIntersectionPrimitiveIndexEXT( rayQuery, true ) );
+            positions[ 0 ] = p[ 0 ];
+            positions[ 1 ] = p[ 1 ];
+            positions[ 2 ] = p[ 2 ];
+        }
+#else
         mat4x3 objectToWorld = rayQueryGetIntersectionObjectToWorldEXT( rayQuery, true );
 
-        vec3 positions[ 3 ];
         rayQueryGetIntersectionTriangleVertexPositionsEXT( rayQuery, true, positions );
 
         positions[ 0 ] = objectToWorld * vec4( positions[ 0 ], 1.0 );
         positions[ 1 ] = objectToWorld * vec4( positions[ 1 ], 1.0 );
         positions[ 2 ] = objectToWorld * vec4( positions[ 2 ], 1.0 );
+#endif
 
         normal = normalize( cross( positions[ 1 ] - positions[ 0 ], //
                                    positions[ 2 ] - positions[ 0 ] ) );
@@ -166,11 +189,19 @@ void resolveCollisions( inout ShParticleDef particle )
             safeNormalize2( push.gravity, vec3( 0, 0, -1 ) ), rnd.x, rnd.y, ignored );
     }
 
+#ifdef METAL
+    // the ray from where the particle was before this step: otherwise, if the step is longer than
+    // DistanceError (a fast fall at a low frame rate), a surface can be passed through
+    const float backoff = max( DistanceError, len * deltaTime() );
+#else
+    const float backoff = DistanceError;
+#endif
+
     vec3 hit;
     vec3 normal;
-    if( traceCollisionRay( particle.position - dir * DistanceError, //
+    if( traceCollisionRay( particle.position - dir * backoff, //
                             dir,
-                            max( SmoothingRadius * 2, len ),
+                            max( SmoothingRadius * 2, len ) + ( backoff - DistanceError ),
                             hit,
                             normal ) )
     {

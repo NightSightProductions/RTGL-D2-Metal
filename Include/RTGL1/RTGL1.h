@@ -41,6 +41,12 @@
 
 #define RG_RTGL_VERSION_API "001.006.000"
 
+#if !defined( _WIN32 )
+    // for rgLoadLibraryAndCreate
+    #include <dlfcn.h>
+    #include <string.h>
+#endif // !defined( _WIN32 )
+
 #ifdef RG_USE_SURFACE_WIN32
     #include <windows.h>
 #endif // RG_USE_SURFACE_WIN32
@@ -310,10 +316,14 @@ typedef RgResult( RGAPI_PTR* PFN_rgDestroyInstance )();
 // .exe should export these symbols to find 'D3D12Core.dll', otherwise D3D12 init might fail,
 // because user's Windows might have an older D3D12Core which is incompatible with RTGL.
 // 'pOverrideFolderPath' here should be the same as 'RgInstanceCreateInfo::pOverrideFolderPath'
+#if defined( _WIN32 )
 #define RG_D3D12CORE_HELPER( pOverrideFolderPath )                                  \
     extern "C" __declspec( dllexport ) extern const uint32_t D3D12SDKVersion = 611; \
     extern "C" __declspec( dllexport ) extern const char*    D3D12SDKPath =         \
         ( pOverrideFolderPath "\\bin\\" ); 
+#else
+#define RG_D3D12CORE_HELPER( pOverrideFolderPath )
+#endif // defined( _WIN32 )
 
 
 
@@ -779,6 +789,12 @@ typedef enum RgRenderSharpenTechnique
     RG_RENDER_SHARPEN_TECHNIQUE_AMD_CAS,
 } RgRenderSharpenTechnique;
 
+typedef enum RgDenoiser
+{
+    RG_DENOISER_DEFAULT, // RTGL1's (SVGF)
+    RG_DENOISER_METALFX, // Metal: MetalFX temporal denoised scaler (denoises and upscales). Check RG_FEATURE_METALFX_DENOISER
+} RgDenoiser;
+
 typedef enum RgRenderResolutionMode
 {
     RG_RENDER_RESOLUTION_MODE_CUSTOM,
@@ -806,6 +822,8 @@ typedef struct RgStartFrameRenderResolutionParams
     // be done in higher resolution.
     RgBool32                 pixelizedRenderSizeEnable;
     RgExtent2D               pixelizedRenderSize;
+    // Ignored, if the denoiser is not available
+    RgDenoiser               denoiser;
 } RgStartFrameRenderResolutionParams;
 
 // Can be linked after RgStartFrameInfo.
@@ -829,12 +847,16 @@ typedef enum RgStaticSceneStatusFlagBits
 } RgStaticSceneStatusFlagBits;
 typedef uint32_t RgStaticSceneStatusFlags;
 
+#define RG_VSYNC_HALF_RATE 2
+
 typedef struct RgStartFrameInfo
 {
     RgStructureType sType;
     void*           pNext;
     const char*     pMapName;
     RgBool32        ignoreExternalGeometry;
+    // 0 - off, 1 - on, RG_VSYNC_HALF_RATE - on, but at half of the display's refresh rate
+    // (even frame times, if the frame rate is lower than the display's; Metal only, otherwise the same as 1)
     RgBool32        vsync;
     RgBool32        hdr;
     RgBool32        allowMapAutoExport;
@@ -1203,6 +1225,7 @@ typedef enum RgFeatureFlagBits
 {
     RG_FEATURE_HDR      = 1,
     RG_FEATURE_FLUID    = 2,
+    RG_FEATURE_METALFX_DENOISER = 4,
 } RgFeatureFlagBits;
 typedef uint32_t RgFeatureFlags;
 
@@ -1351,6 +1374,93 @@ inline RgResult rgDestroyAndUnloadLibrary( RgInterface* pInterface, HMODULE dll 
     memset( pInterface, 0, sizeof( *pInterface ) );
 
     FreeLibrary( dll );
+
+    return RG_RESULT_SUCCESS;
+}
+
+#else
+
+#if defined( __APPLE__ )
+    #define RG_LIBRARY_FILE_NAME "libRTGL1.dylib"
+#else
+    #define RG_LIBRARY_FILE_NAME "libRTGL1.so"
+#endif
+
+inline RgResult rgLoadLibraryAndCreate( const RgInstanceCreateInfo* pInfo,
+                                        RgBool32                    useDebugBinary,
+                                        const char*                 customBinaryPath,
+                                        RgInterface*                pOutInterface,
+                                        void**                      pOutDll )
+{
+    if( pOutDll )
+    {
+        *pOutDll = NULL;
+    }
+
+    if( !pInfo || !pInfo->pOverrideFolderPath )
+    {
+        return RG_RESULT_WRONG_FUNCTION_ARGUMENT;
+    }
+
+    if( pInfo->version == NULL || strcmp( pInfo->version, RG_RTGL_VERSION_API ) != 0 )
+    {
+        return RG_RESULT_WRONG_FUNCTION_ARGUMENT;
+    }
+
+    if( pInfo->sizeOfRgInterface != sizeof( RgInterface ) )
+    {
+        return RG_RESULT_WRONG_FUNCTION_ARGUMENT;
+    }
+
+    char rtglLibPath[ 4096 ];
+    {
+        const char* libPath = customBinaryPath ? customBinaryPath
+                              : useDebugBinary ? "/bin/debug/" RG_LIBRARY_FILE_NAME
+                                               : "/bin/" RG_LIBRARY_FILE_NAME;
+
+        if( strlen( pInfo->pOverrideFolderPath ) + strlen( libPath ) >= sizeof( rtglLibPath ) - 1 )
+        {
+            return RG_RESULT_WRONG_FUNCTION_ARGUMENT;
+        }
+
+        rtglLibPath[ 0 ] = '\0';
+        strcpy( rtglLibPath, pInfo->pOverrideFolderPath );
+        strcat( rtglLibPath, libPath );
+    }
+
+    void* lib = dlopen( rtglLibPath, RTLD_NOW | RTLD_LOCAL );
+    if( !lib )
+    {
+        return RG_RESULT_CANT_FIND_DYNAMIC_LIBRARY;
+    }
+
+    PFN_rgCreateInstance createFunc = ( PFN_rgCreateInstance )dlsym( lib, "rgCreateInstance" );
+
+    if( !createFunc )
+    {
+        dlclose( lib );
+        return RG_RESULT_CANT_FIND_ENTRY_FUNCTION_IN_DYNAMIC_LIBRARY;
+    }
+
+    if( pOutDll )
+    {
+        *pOutDll = lib;
+    }
+
+    return createFunc( pInfo, pOutInterface );
+}
+
+inline RgResult rgDestroyAndUnloadLibrary( RgInterface* pInterface, void* lib )
+{
+    if( !pInterface || !lib )
+    {
+        return RG_RESULT_WRONG_FUNCTION_ARGUMENT;
+    }
+
+    pInterface->rgDestroyInstance();
+    memset( pInterface, 0, sizeof( *pInterface ) );
+
+    dlclose( lib );
 
     return RG_RESULT_SUCCESS;
 }
